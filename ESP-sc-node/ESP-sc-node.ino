@@ -37,16 +37,9 @@ const lmic_pinmap lmic_pins = {
 CayenneLPP lpp(15);
 
 
-double readSensor(double* temperature)
+int readSensor(double* temperature, double * humidity)
 {
-  //holds 2 bytes of data from I2C Line
-  uint8_t Byte[4];
-
-  //holds the total contents of the temp register
-  uint16_t temp;
-
-  //holds the total contents of the humidity register
-  uint16_t humidity;
+  Serial.printf("Reading humidity and temperature values ...\r\n");  
   
   //Point to device 0x40 (Address for HDC1080)
   Wire.beginTransmission(0x40);
@@ -61,35 +54,34 @@ double readSensor(double* temperature)
   
   //Request four bytes from registers
   Wire.requestFrom(0x40, 4);
-
-  delay(1);
   
   //If the 4 bytes were returned sucessfully
-  if (4 <= Wire.available())
+  //if (4 <= Wire.available())
   {
+    uint16_t rawTemp;
+    uint16_t rawHumid;
+
+    Serial.printf("Got 4 bytes read ...\r\n");
     //take reading
     //Byte[0] holds upper byte of temp reading
-    Byte[0] = Wire.read();
+    rawTemp = rawTemp << 8 | Wire.read();
     //Byte[1] holds lower byte of temp reading
-    Byte[1] = Wire.read();
+    rawTemp = rawTemp << 8 | Wire.read();
     
     //Byte[3] holds upper byte of humidity reading
-    Byte[3] = Wire.read();
+    rawHumid = rawHumid << 8 | Wire.read();
     //Byte[4] holds lower byte of humidity reading
-    Byte[4] = Wire.read();
-
-    //Combine the two bytes to make one 16 bit int
-    temp = (((unsigned int)Byte[0] <<8 | Byte[1]));
+    rawHumid = rawHumid << 8 | Wire.read();
 
     //Temp(C) = reading/(2^16)*165(C) - 40(C)
-    *temperature = (double)(temp)/(65536)*165-40;
-
-   //Combine the two bytes to make one 16 bit int
-    humidity = (((unsigned int)Byte[3] <<8 | Byte[4]));
+    *temperature = ((double)(rawTemp)) * 165 / 65536 - 40;
 
     //Humidity(%) = reading/(2^16)*100%
-    return (double)(humidity)/(65536)*100;
+    *humidity =  ((double)(rawHumid)) * 100/65536;
+
+    return 0;
   }
+  return -1;
 }
 
 void onEvent (ev_t ev) 
@@ -128,7 +120,7 @@ void do_send(osjob_t* j)
     double temperature;
     double humidity;
 
-    humidity = readSensor(&temperature);    
+    readSensor(&temperature, &humidity);    
     
     lpp.reset();
     lpp.addTemperature(1, temperature);
@@ -155,7 +147,7 @@ void setup()
   //Configure HDC1080
   Wire.beginTransmission(0x40);
   Wire.write(0x02);
-  Wire.write(0x90);
+  Wire.write(0x10);
   Wire.write(0x00);
   Wire.endTransmission();
 
