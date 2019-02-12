@@ -4,8 +4,12 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <math.h>
+#include <Wire.h>
+#include <SeeedOLED.h>
+#include "Ultrasonic.h"
 
-
+// defines pins numbers
+const int ultrasonicPin = 12;
 
 // LoRaWAN NwkSKey, network session key
 static const PROGMEM u1_t NWKSKEY[16] = { 0x3F, 0xF6, 0xDB, 0xCD, 0x44, 0x1C, 0x7C, 0xA1, 0x29, 0x50, 0x78, 0xA5, 0xB1, 0xCF, 0xE7, 0x41 };
@@ -35,6 +39,7 @@ const lmic_pinmap lmic_pins = {
 };
 
 CayenneLPP lpp(15);
+Ultrasonic ultrasonic(ultrasonicPin);
 
 
 int readSensor(double* temperature, double * humidity)
@@ -56,12 +61,12 @@ int readSensor(double* temperature, double * humidity)
   Wire.requestFrom(0x40, 4);
   
   //If the 4 bytes were returned sucessfully
-  //if (4 <= Wire.available())
+  if (4 <= Wire.available())
   {
     uint16_t rawTemp;
     uint16_t rawHumid;
 
-    Serial.printf("Got 4 bytes read ...\r\n");
+    //Serial.printf("Got 4 bytes read ...\r\n");
     //take reading
     //Byte[0] holds upper byte of temp reading
     rawTemp = rawTemp << 8 | Wire.read();
@@ -109,6 +114,8 @@ void onEvent (ev_t ev)
 
 void do_send(osjob_t* j)
 {
+  char buffer[100];
+  
   // Check if there is not a current TX/RX job running
   if (LMIC.opmode & OP_TXRXPEND) 
   {
@@ -120,14 +127,32 @@ void do_send(osjob_t* j)
     double temperature;
     double humidity;
 
+    // Read the temperature and humidity sensor 
+    // from our board
     readSensor(&temperature, &humidity);    
+
+    // Get the water level
+    // First get the distance to water in centimeters
+    long distanceToWater = ultrasonic.MeasureInCentimeters(); 
+
+    // To get the water level, we must subtract value from sensor height in centimeters
+    // TODO: CHOOSE THE SENSOR HEIGHT IN YOUR SETUP. Assuming we have a height of 100cm (1 meter)
+    // Note that the grove ultrasonic sensor is only accurate up to a certain range (around 10 feet, or 250cm)
+    //long waterLevel = 100 - distanceToWater; // assuming sensor heigt = 100cm
+    long waterLevel = distanceToWater; // For now just send the value of the sensor
+    //Serial.printf("Distance to water is : %d, Water Level : %d\r\n", distanceToWater, waterLevel);
     
     lpp.reset();
     lpp.addTemperature(1, temperature);
     lpp.addRelativeHumidity(2, humidity);
-    
-    Serial.printf("Temperature : %.2f, Humidity : %.2f\r\n", temperature, humidity);
+    lpp.addAnalogInput(3,(float) waterLevel); // digital input only allows 256 (uint8_t) range, so we use analog input
 
+    Serial.printf("Temperature : %.2f, Humidity : %.2f, Water Level: %d\r\n", temperature, humidity, waterLevel);
+    SeeedOled.clearDisplay();
+    sprintf(&buffer[0], "Lvl: %d", waterLevel);
+    SeeedOled.putString(buffer);
+    
+    
     // Prepare upstream data transmission at the next possible time.
     LMIC_setTxData2(1, lpp.getBuffer(), lpp.getSize(), 0);
          
@@ -144,6 +169,14 @@ void setup()
    //Initialize I2C Communication
   Wire.begin();
   
+  SeeedOled.init();  //initialze SEEED OLED display
+
+  SeeedOled.clearDisplay();          //clear the screen and set start position to top left corner
+  SeeedOled.setNormalDisplay();      //Set display to normal mode (i.e non-inverse mode)
+  SeeedOled.setPageMode();           //Set addressing mode to Page Mode
+  SeeedOled.setTextXY(0, 0);         //Set the cursor to Xth Page, Yth Column
+  SeeedOled.putString("Lora node starting ...!"); //Print the String
+   
   //Configure HDC1080
   Wire.beginTransmission(0x40);
   Wire.write(0x02);
